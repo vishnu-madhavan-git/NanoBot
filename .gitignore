@@ -1,0 +1,6 @@
+secrets.json
+state.json
+nano.log
+__pycache__/
+*.pyc
+.venv/
