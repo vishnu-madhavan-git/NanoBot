@@ -103,6 +103,17 @@ _SYSTEM = (
     "If asked to do something you can't, say so briefly and suggest an alternative."
 )
 
+def _load_qwen_token() -> tuple[str, str] | None:
+    creds_path = Path.home() / ".qwen" / "oauth_creds.json"
+    try:
+        if creds_path.exists():
+            creds = json.loads(creds_path.read_text(encoding="utf-8"))
+            url = f"https://{creds['resource_url']}/v1"
+            return creds["access_token"], url
+    except Exception:
+        pass
+    return None
+
 def ask_llm(history: list[dict], prompt: str, system: str | None = None) -> str:
     from openai import OpenAI
 
@@ -111,6 +122,22 @@ def ask_llm(history: list[dict], prompt: str, system: str | None = None) -> str:
     msgs += history[-6:]
     msgs.append({"role": "user", "content": prompt})
 
+    # 1. Qwen OAuth (Primary)
+    qwen = _load_qwen_token()
+    if qwen:
+        token, base_url = qwen
+        try:
+            client = OpenAI(api_key=token, base_url=base_url, timeout=15.0)
+            resp = client.chat.completions.create(
+                model="qwen3-coder-plus", messages=msgs, max_tokens=600,
+            )
+            ans = resp.choices[0].message.content.strip()
+            _log("LLM:qwen", f"ok {len(ans)}c")
+            return ans
+        except Exception as e:
+            _log("LLM:qwen", f"failed: {e}")
+
+    # 2. Gemini 1.5 Flash
     gemini_key = CFG.get("gemini_api_key", "")
     if gemini_key and not gemini_key.startswith("YOUR_"):
         try:
@@ -119,6 +146,7 @@ def ask_llm(history: list[dict], prompt: str, system: str | None = None) -> str:
                 base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
                 timeout=20.0,
             )
+            # Use 'gemini-1.5-flash' (confirmed available via list)
             resp = client.chat.completions.create(
                 model="gemini-1.5-flash", messages=msgs, max_tokens=600
             )
@@ -128,6 +156,7 @@ def ask_llm(history: list[dict], prompt: str, system: str | None = None) -> str:
         except Exception as e:
             _log("LLM:gemini", f"failed: {e}")
 
+    # 3. Grok (Fallback)
     grok_key = CFG.get("grok_api_key", "")
     if grok_key and not grok_key.startswith("YOUR_"):
         try:
@@ -142,7 +171,7 @@ def ask_llm(history: list[dict], prompt: str, system: str | None = None) -> str:
         except Exception as e:
             _log("LLM:grok", f"failed: {e}")
 
-    return "⚠️ All LLM providers failed — check API keys."
+    return "⚠️ I'm here, but my LLM brains are unavailable: Qwen (401), Gemini (Quota/404), Grok (403). Please check your API keys and credits."
 
 # ── Auth guard ─────────────────────────────────────────────────────────────────
 
